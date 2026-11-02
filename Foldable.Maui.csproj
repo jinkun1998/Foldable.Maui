@@ -17,6 +17,7 @@
 		<Product>Foldable.Maui</Product>
 		<Description>Modern .NET MAUI library for detecting foldable device posture, hinge angle, and rendering responsive split layouts.</Description>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/jinkun1998/Foldable.Maui</RepositoryUrl>
 		<PackageTags>maui;foldable;dual-screen;hinge-angle;surface-duo;galaxy-z-fold;pixel-fold;responsive</PackageTags>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -25,6 +26,10 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
