@@ -1,4 +1,5 @@
 using Android.Content;
+using Android.Content.Res;
 using Android.Hardware;
 using Android.Runtime;
 using AndroidX.Core.Util;
@@ -10,7 +11,7 @@ using Microsoft.Maui.ApplicationModel;
 
 namespace Foldable.Maui.Platforms.Android;
 
-public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService, ISensorEventListener, IConsumer
+public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService, ISensorEventListener, IConsumer, IComponentCallbacks
 {
     private readonly SensorManager? _sensorManager;
     private readonly Sensor? _hingeSensor;
@@ -35,7 +36,8 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
 
         // Sensor.TypeHingeAngle = 36 (Android 11+)
         _hingeSensor = _sensorManager?.GetDefaultSensor((SensorType)36)
-            ?? _sensorManager?.GetSensorList((SensorType)36).FirstOrDefault();
+            ?? _sensorManager?.GetSensorList((SensorType)36)?.FirstOrDefault()
+            ?? _sensorManager?.GetSensorList(SensorType.All)?.FirstOrDefault(s => (int)s.Type == 36 || s.StringType == "android.sensor.hinge_angle");
 
         _gravitySensor = _sensorManager?.GetDefaultSensor(SensorType.Gravity)
             ?? _sensorManager?.GetDefaultSensor(SensorType.Accelerometer);
@@ -49,9 +51,17 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         if (_sensorManager != null)
         {
             if (_hingeSensor != null)
-                _sensorManager.RegisterListener(this, _hingeSensor, SensorDelay.Normal);
+                _sensorManager.RegisterListener(this, _hingeSensor, SensorDelay.Ui);
             if (_gravitySensor != null)
-                _sensorManager.RegisterListener(this, _gravitySensor, SensorDelay.Normal);
+                _sensorManager.RegisterListener(this, _gravitySensor, SensorDelay.Ui);
+        }
+
+        try
+        {
+            global::Android.App.Application.Context.RegisterComponentCallbacks(this);
+        }
+        catch
+        {
         }
 
         var activity = Platform.CurrentActivity;
@@ -71,6 +81,8 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
                 System.Diagnostics.Debug.WriteLine($"WindowInfoTracker initialization error: {ex.Message}");
             }
         }
+
+        RecomputeState();
     }
 
     public void StopListening()
@@ -84,6 +96,14 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
                 _sensorManager.UnregisterListener(this, _hingeSensor);
             if (_gravitySensor != null)
                 _sensorManager.UnregisterListener(this, _gravitySensor);
+        }
+
+        try
+        {
+            global::Android.App.Application.Context.UnregisterComponentCallbacks(this);
+        }
+        catch
+        {
         }
 
         if (_trackerAdapter != null)
@@ -103,7 +123,8 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
     {
         if (e == null || e.Values == null || e.Values.Count == 0 || e.Sensor == null) return;
 
-        if (e.Sensor.Type == (SensorType)36)
+        int sensorType = (int)e.Sensor.Type;
+        if (sensorType == 36 || e.Sensor.StringType == "android.sensor.hinge_angle")
         {
             _lastAngle = e.Values[0];
             RecomputeState();
@@ -111,14 +132,18 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         else if (e.Sensor.Type == SensorType.Gravity || e.Sensor.Type == SensorType.Accelerometer)
         {
             _lastGravityZ = e.Values[2];
-            if (_lastFoldState == FoldingFeatureState.HalfOpened || (_lastAngle > 15f && _lastAngle < 165f))
-            {
-                RecomputeState();
-            }
+            RecomputeState();
         }
     }
 
     public void OnAccuracyChanged(Sensor? sensor, [GeneratedEnum] SensorStatus accuracy) { }
+
+    public void OnConfigurationChanged(Configuration newConfig)
+    {
+        RecomputeState();
+    }
+
+    public void OnLowMemory() { }
 
     public void Accept(Java.Lang.Object? obj)
     {
@@ -154,6 +179,28 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         RecomputeState();
     }
 
+    private static bool IsInnerScreen()
+    {
+        var context = Platform.CurrentActivity ?? (Context?)global::Android.App.Application.Context;
+        var config = context?.Resources?.Configuration;
+        if (config != null && config.SmallestScreenWidthDp >= 600)
+        {
+            return true;
+        }
+
+        var metrics = context?.Resources?.DisplayMetrics;
+        if (metrics != null)
+        {
+            float minDp = Math.Min(metrics.WidthPixels, metrics.HeightPixels) / metrics.Density;
+            if (minDp >= 550f)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void RecomputeState()
     {
         bool isFoldable = _hingeSensor != null || _hasHingeFeature;
@@ -170,51 +217,80 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
             return;
         }
 
+        bool isInner = IsInnerScreen();
         FoldPosture posture;
         float angle;
 
         if (_hasHingeFeature)
         {
-            // Inner unfolded screen is active
-            if (_lastFoldState == FoldingFeatureState.Flat)
+            if (_lastFoldState == FoldingFeatureState.HalfOpened)
             {
-                posture = FoldPosture.Flat;
-                angle = (_lastAngle.HasValue && _lastAngle.Value >= 165f) ? _lastAngle.Value : 180f;
+                bool isTent = !isInner && Math.Abs(_lastGravityZ) < 4.0f;
+                posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
+                angle = _lastAngle ?? (isTent ? 80f : 90f);
             }
             else
             {
-                // Half-opened: distinguish Tent vs Tabletop using Z-gravity
-                bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
-                posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
-                angle = (_lastAngle.HasValue && _lastAngle.Value > 15f && _lastAngle.Value < 165f) ? _lastAngle.Value : 90f;
+                posture = FoldPosture.Flat;
+                angle = _lastAngle ?? 180f;
             }
         }
         else
         {
-            // App window does not cross a hinge: on a foldable, this is the cover display (closed)
-            if (_lastAngle.HasValue)
+            if (isInner)
             {
-                if (_lastAngle.Value <= 15f)
+                if (_lastAngle.HasValue)
                 {
-                    posture = FoldPosture.Closed;
-                    angle = _lastAngle.Value;
-                }
-                else if (_lastAngle.Value >= 165f)
-                {
-                    posture = FoldPosture.Flat;
-                    angle = _lastAngle.Value;
+                    if (_lastAngle.Value <= 15f)
+                    {
+                        posture = FoldPosture.Closed;
+                        angle = _lastAngle.Value;
+                    }
+                    else if (_lastAngle.Value >= 165f)
+                    {
+                        posture = FoldPosture.Flat;
+                        angle = _lastAngle.Value;
+                    }
+                    else
+                    {
+                        bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
+                        posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
+                        angle = _lastAngle.Value;
+                    }
                 }
                 else
                 {
-                    bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
-                    posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
-                    angle = _lastAngle.Value;
+                    posture = FoldPosture.Flat;
+                    angle = 180f;
                 }
             }
             else
             {
-                posture = FoldPosture.Closed;
-                angle = 0f;
+                if (_lastAngle.HasValue)
+                {
+                    if (_lastAngle.Value <= 15f)
+                    {
+                        posture = FoldPosture.Closed;
+                        angle = _lastAngle.Value;
+                    }
+                    else if (_lastAngle.Value >= 165f)
+                    {
+                        posture = FoldPosture.Flat;
+                        angle = _lastAngle.Value;
+                    }
+                    else
+                    {
+                        bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
+                        posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
+                        angle = _lastAngle.Value;
+                    }
+                }
+                else
+                {
+                    bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
+                    posture = isTent ? FoldPosture.Tent : FoldPosture.Closed;
+                    angle = isTent ? 80f : 0f;
+                }
             }
         }
 
