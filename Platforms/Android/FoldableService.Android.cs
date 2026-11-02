@@ -19,6 +19,7 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
     private WindowInfoTrackerCallbackAdapter? _trackerAdapter;
     private float? _lastAngle;
     private float _lastGravityZ = 9.8f;
+    private int? _lastDeviceState;
     private bool _hasHingeFeature;
     private FoldingFeatureState? _lastFoldState;
     private HingeOrientation _lastOrientation = HingeOrientation.None;
@@ -51,9 +52,9 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         if (_sensorManager != null)
         {
             if (_hingeSensor != null)
-                _sensorManager.RegisterListener(this, _hingeSensor, SensorDelay.Ui);
+                _sensorManager.RegisterListener(this, _hingeSensor, SensorDelay.Normal);
             if (_gravitySensor != null)
-                _sensorManager.RegisterListener(this, _gravitySensor, SensorDelay.Ui);
+                _sensorManager.RegisterListener(this, _gravitySensor, SensorDelay.Normal);
         }
 
         try
@@ -64,13 +65,15 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         {
         }
 
+        RegisterDeviceStateManager();
+
         var activity = Platform.CurrentActivity;
         if (activity != null)
         {
             try
             {
                 _trackerAdapter = new WindowInfoTrackerCallbackAdapter(WindowInfoTracker.Companion.GetOrCreate(activity));
-                var executor = Java.Util.Concurrent.Executors.NewSingleThreadExecutor();
+                var executor = AndroidX.Core.Content.ContextCompat.GetMainExecutor(activity);
                 if (executor != null)
                 {
                     _trackerAdapter.AddWindowLayoutInfoListener(activity, executor, this);
@@ -78,11 +81,118 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"WindowInfoTracker initialization error: {ex.Message}");
+                global::Android.Util.Log.Warn("FoldableMaui", $"WindowInfoTracker error: {ex.Message}");
             }
         }
 
         RecomputeState();
+    }
+
+    private void RegisterDeviceStateManager()
+    {
+        try
+        {
+            var dsm = global::Android.App.Application.Context.GetSystemService("device_state");
+            if (dsm == null) return;
+
+            var dsmClass = dsm.Class;
+            var methods = dsmClass.GetMethods();
+            var registerMethod = methods.FirstOrDefault(m => m.Name == "registerCallback" || m.Name == "registerDeviceStateCallback");
+            if (registerMethod == null) return;
+
+            var pParams = registerMethod.GetParameterTypes();
+            var callbackType = pParams.Last();
+
+            var handler = new DeviceStateInvocationHandler(state =>
+            {
+                global::Android.Util.Log.Info("FoldableMaui", $"DeviceStateManager live state: {state}");
+                _lastDeviceState = state;
+                RecomputeState();
+            });
+
+            var proxy = Java.Lang.Reflect.Proxy.NewProxyInstance(
+                callbackType.ClassLoader,
+                new Java.Lang.Class[] { callbackType },
+                handler);
+
+            var executor = new DirectExecutor();
+            if (pParams.Length == 2)
+            {
+                registerMethod.Invoke(dsm, new Java.Lang.Object[] { executor, (Java.Lang.Object)proxy });
+            }
+            else
+            {
+                registerMethod.Invoke(dsm, new Java.Lang.Object[] { (Java.Lang.Object)proxy });
+            }
+            global::Android.Util.Log.Info("FoldableMaui", "Successfully hooked DeviceStateManager callback.");
+        }
+        catch (Exception ex)
+        {
+            global::Android.Util.Log.Warn("FoldableMaui", $"DeviceStateManager registration: {ex.Message}");
+        }
+    }
+
+    private class DirectExecutor : Java.Lang.Object, Java.Util.Concurrent.IExecutor
+    {
+        public void Execute(Java.Lang.IRunnable? command)
+        {
+            command?.Run();
+        }
+    }
+
+    private class DeviceStateInvocationHandler : Java.Lang.Object, Java.Lang.Reflect.IInvocationHandler
+    {
+        private readonly Action<int> _onState;
+
+        public DeviceStateInvocationHandler(Action<int> onState)
+        {
+            _onState = onState;
+        }
+
+        public Java.Lang.Object? Invoke(Java.Lang.Object? proxy, Java.Lang.Reflect.Method? method, Java.Lang.Object[]? args)
+        {
+            string name = method?.Name ?? "";
+            if (name == "onDeviceStateChanged" || name == "onStateChanged")
+            {
+                if (args != null && args.Length > 0 && args[0] != null)
+                {
+                    try
+                    {
+                        var arg = args[0];
+                        if (arg is Java.Lang.Integer intVal)
+                        {
+                            _onState(intVal.IntValue());
+                        }
+                        else
+                        {
+                            var getIdentifier = arg.Class.GetMethod("getIdentifier");
+                            var idObj = getIdentifier?.Invoke(arg, null);
+                            if (idObj is Java.Lang.Integer idInt)
+                            {
+                                _onState(idInt.IntValue());
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        global::Android.Util.Log.Warn("FoldableMaui", $"Proxy extract: {ex.Message}");
+                    }
+                }
+            }
+            else if (name == "hashCode")
+            {
+                return Java.Lang.Integer.ValueOf(GetHashCode());
+            }
+            else if (name == "equals" && args != null && args.Length == 1)
+            {
+                return Java.Lang.Boolean.ValueOf(proxy == args[0]);
+            }
+            else if (name == "toString")
+            {
+                return new Java.Lang.String("DeviceStateCallbackProxy");
+            }
+            return null;
+        }
     }
 
     public void StopListening()
@@ -131,8 +241,12 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         }
         else if (e.Sensor.Type == SensorType.Gravity || e.Sensor.Type == SensorType.Accelerometer)
         {
-            _lastGravityZ = e.Values[2];
-            RecomputeState();
+            float z = e.Values[2];
+            if (Math.Abs(z - _lastGravityZ) > 1.5f)
+            {
+                _lastGravityZ = z;
+                RecomputeState();
+            }
         }
     }
 
@@ -203,7 +317,7 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
 
     private void RecomputeState()
     {
-        bool isFoldable = _hingeSensor != null || _hasHingeFeature;
+        bool isFoldable = _hingeSensor != null || _hasHingeFeature || _lastDeviceState.HasValue;
         if (!isFoldable)
         {
             DispatchUpdate(new FoldInfo
@@ -217,101 +331,107 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
             return;
         }
 
+        var context = Platform.CurrentActivity ?? (Context?)global::Android.App.Application.Context;
+        var config = context?.Resources?.Configuration;
+        bool isLandscape = config?.Orientation == global::Android.Content.Res.Orientation.Landscape;
+        HingeOrientation defaultOrientation = isLandscape ? HingeOrientation.Horizontal : HingeOrientation.Vertical;
+        HingeOrientation orientation = _lastOrientation != HingeOrientation.None ? _lastOrientation : defaultOrientation;
+
         bool isInner = IsInnerScreen();
         FoldPosture posture;
         float angle;
 
-        if (_hasHingeFeature)
+        if (_lastDeviceState.HasValue)
+        {
+            // Android DeviceStateManager: 0=CLOSED, 1=TENT, 2=HALF_OPENED, 3=OPENED
+            switch (_lastDeviceState.Value)
+            {
+                case 0:
+                    posture = FoldPosture.Closed;
+                    angle = (_lastAngle.HasValue && _lastAngle.Value <= 15f) ? _lastAngle.Value : 0f;
+                    break;
+                case 1:
+                    posture = FoldPosture.Tent;
+                    angle = (_lastAngle.HasValue && _lastAngle.Value > 15f && _lastAngle.Value < 165f) ? _lastAngle.Value : 80f;
+                    break;
+                case 2:
+                    bool isTent = Math.Abs(_lastGravityZ) < 3.0f && !isInner;
+                    posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
+                    angle = (_lastAngle.HasValue && _lastAngle.Value > 15f && _lastAngle.Value < 165f)
+                        ? _lastAngle.Value
+                        : (isTent ? 80f : 90f);
+                    break;
+                case 3:
+                default:
+                    posture = FoldPosture.Flat;
+                    angle = (_lastAngle.HasValue && _lastAngle.Value >= 165f) ? _lastAngle.Value : 180f;
+                    break;
+            }
+        }
+        else if (_hasHingeFeature)
         {
             if (_lastFoldState == FoldingFeatureState.HalfOpened)
             {
                 bool isTent = !isInner && Math.Abs(_lastGravityZ) < 4.0f;
                 posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
-                angle = _lastAngle ?? (isTent ? 80f : 90f);
+                angle = (_lastAngle.HasValue && _lastAngle.Value > 15f && _lastAngle.Value < 165f)
+                    ? _lastAngle.Value
+                    : (isTent ? 80f : 90f);
             }
             else
             {
                 posture = FoldPosture.Flat;
-                angle = _lastAngle ?? 180f;
+                angle = (_lastAngle.HasValue && _lastAngle.Value >= 165f) ? _lastAngle.Value : 180f;
             }
         }
         else
         {
             if (isInner)
             {
-                if (_lastAngle.HasValue)
-                {
-                    if (_lastAngle.Value <= 15f)
-                    {
-                        posture = FoldPosture.Closed;
-                        angle = _lastAngle.Value;
-                    }
-                    else if (_lastAngle.Value >= 165f)
-                    {
-                        posture = FoldPosture.Flat;
-                        angle = _lastAngle.Value;
-                    }
-                    else
-                    {
-                        bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
-                        posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
-                        angle = _lastAngle.Value;
-                    }
-                }
-                else
-                {
-                    posture = FoldPosture.Flat;
-                    angle = 180f;
-                }
+                posture = FoldPosture.Flat;
+                angle = (_lastAngle.HasValue && _lastAngle.Value >= 165f) ? _lastAngle.Value : 180f;
             }
             else
             {
-                if (_lastAngle.HasValue)
-                {
-                    if (_lastAngle.Value <= 15f)
-                    {
-                        posture = FoldPosture.Closed;
-                        angle = _lastAngle.Value;
-                    }
-                    else if (_lastAngle.Value >= 165f)
-                    {
-                        posture = FoldPosture.Flat;
-                        angle = _lastAngle.Value;
-                    }
-                    else
-                    {
-                        bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
-                        posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
-                        angle = _lastAngle.Value;
-                    }
-                }
-                else
-                {
-                    bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
-                    posture = isTent ? FoldPosture.Tent : FoldPosture.Closed;
-                    angle = isTent ? 80f : 0f;
-                }
+                bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
+                posture = isTent ? FoldPosture.Tent : FoldPosture.Closed;
+                angle = isTent
+                    ? ((_lastAngle.HasValue && _lastAngle.Value > 15f && _lastAngle.Value < 165f) ? _lastAngle.Value : 80f)
+                    : ((_lastAngle.HasValue && _lastAngle.Value <= 15f) ? _lastAngle.Value : 0f);
             }
         }
 
         bool isSeparating = posture == FoldPosture.HalfOpened;
+
+        Rect bounds = _lastBounds;
+        if (bounds == Rect.Zero && isInner)
+        {
+            var metrics = context?.Resources?.DisplayMetrics;
+            float density = metrics?.Density ?? 2.625f;
+            float widthDp = (metrics?.WidthPixels ?? 1812) / density;
+            float heightDp = (metrics?.HeightPixels ?? 2176) / density;
+            bounds = isLandscape
+                ? new Rect(0, heightDp / 2, widthDp, 0)
+                : new Rect(widthDp / 2, 0, 0, heightDp);
+        }
 
         DispatchUpdate(new FoldInfo
         {
             IsFoldable = true,
             IsSeparating = isSeparating,
             Posture = posture,
-            Orientation = _lastOrientation,
+            Orientation = orientation,
             HingeAngle = angle,
-            HingeBounds = _lastBounds
+            HingeBounds = bounds
         });
     }
 
     private void DispatchUpdate(FoldInfo newInfo)
     {
+        if (newInfo == CurrentInfo) return;
+        CurrentInfo = newInfo;
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            CurrentInfo = newInfo;
             FoldInfoChanged?.Invoke(this, new FoldInfoChangedEventArgs(newInfo));
         });
     }

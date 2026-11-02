@@ -7,6 +7,7 @@ public partial class MainPage : ContentPage
 {
     private readonly IFoldableService _foldableService;
     private FoldInfo _currentInfo = FoldInfo.Default;
+    private bool _isManualSimulation;
 
     public MainPage()
     {
@@ -35,6 +36,7 @@ public partial class MainPage : ContentPage
 
     private void OnFoldInfoChanged(object? sender, FoldInfoChangedEventArgs e)
     {
+        if (_isManualSimulation) return;
         MainThread.BeginInvokeOnMainThread(() => UpdateUI(e.Info));
     }
 
@@ -52,7 +54,7 @@ public partial class MainPage : ContentPage
             _ => ("Unknown", Color.FromArgb("#3B82F6"))
         };
 
-        PostureLabel.Text = postureText;
+        PostureLabel.Text = _isManualSimulation ? $"{postureText} (Simulated)" : postureText;
         PostureBadge.Background = new SolidColorBrush(badgeColor);
 
         // Hinge angle
@@ -70,8 +72,8 @@ public partial class MainPage : ContentPage
         // Adaptive description
         PostureHelpText.Text = info.Posture switch
         {
-            FoldPosture.Tent => "Tent mode: Inverted-V posture detected via gravity sensor. Single cover-screen experience.",
-            FoldPosture.HalfOpened => "Tabletop mode: Lower half flat on surface. Controls on bottom, media on top.",
+            FoldPosture.Tent => "Tent mode: Inverted-V posture. Single cover-screen active.",
+            FoldPosture.HalfOpened => "Tabletop mode: Lower half flat on surface. Controls bottom, content top.",
             FoldPosture.Flat => "Flat mode: Fully unfolded display active.",
             FoldPosture.Closed => "Closed mode: Outer screen active.",
             _ => "Move the foldable device to detect live posture changes."
@@ -88,7 +90,6 @@ public partial class MainPage : ContentPage
 
         if (shouldSplit)
         {
-            // Side-by-side split
             RootGrid.ColumnDefinitions.Clear();
             RootGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
             RootGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
@@ -107,7 +108,6 @@ public partial class MainPage : ContentPage
         }
         else
         {
-            // Single pane (stacked or single visible)
             RootGrid.ColumnDefinitions.Clear();
             RootGrid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Star));
 
@@ -126,9 +126,9 @@ public partial class MainPage : ContentPage
         }
     }
 
-    // Manual simulation handlers for testing without physical hinge
     private void OnSimulateFlatClicked(object? sender, EventArgs e)
     {
+        _isManualSimulation = true;
         UpdateUI(new FoldInfo
         {
             IsFoldable = true,
@@ -141,6 +141,7 @@ public partial class MainPage : ContentPage
 
     private void OnSimulateTabletopClicked(object? sender, EventArgs e)
     {
+        _isManualSimulation = true;
         UpdateUI(new FoldInfo
         {
             IsFoldable = true,
@@ -153,6 +154,7 @@ public partial class MainPage : ContentPage
 
     private void OnSimulateTentClicked(object? sender, EventArgs e)
     {
+        _isManualSimulation = true;
         UpdateUI(new FoldInfo
         {
             IsFoldable = true,
@@ -165,6 +167,7 @@ public partial class MainPage : ContentPage
 
     private void OnSimulateClosedClicked(object? sender, EventArgs e)
     {
+        _isManualSimulation = true;
         UpdateUI(new FoldInfo
         {
             IsFoldable = true,
@@ -173,5 +176,11 @@ public partial class MainPage : ContentPage
             HingeAngle = 0f,
             IsSeparating = false
         });
+    }
+
+    private void OnLiveModeClicked(object? sender, EventArgs e)
+    {
+        _isManualSimulation = false;
+        UpdateUI(_foldableService.CurrentInfo);
     }
 }

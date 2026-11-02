@@ -111,6 +111,12 @@
                            Margin="0,8,0,0" />
 
                     <HorizontalStackLayout Spacing="8">
+                        <Button Text="Live Hardware"
+                                Clicked="OnLiveModeClicked"
+                                FontSize="11"
+                                Padding="10,6"
+                                BackgroundColor="#2563EB"
+                                TextColor="White" />
                         <Button Text="Flat (180°)"
                                 Clicked="OnSimulateFlatClicked"
                                 FontSize="11"
