@@ -2,6 +2,8 @@
 
 A modern, lightweight .NET MAUI library for detecting foldable & dual-screen device postures, live hinge angles, and rendering responsive center-split layouts.
 
+[![NuGet Version](https://img.shields.io/nuget/v/Foldable.Maui.svg)](https://www.nuget.org/packages/Foldable.Maui)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/Foldable.Maui.svg)](https://www.nuget.org/packages/Foldable.Maui)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-purple.svg)](https://dotnet.microsoft.com/)
 
