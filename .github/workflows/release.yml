@@ -1,0 +1,70 @@
+name: Release & Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-publish:
+    runs-on: macos-15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install .NET MAUI Workload
+        run: dotnet workload install maui --ignore-failed-sources
+
+      - name: Extract Tag Version
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build & Pack Foldable.Maui NuGet
+        run: |
+          dotnet pack Foldable.Maui.csproj -c Release /p:Version=${{ steps.get_version.outputs.VERSION }} -o ./artifacts
+
+      - name: Build Sample APK
+        run: |
+          dotnet publish samples/Foldable.Maui.Sample/Foldable.Maui.Sample.csproj \
+            -f net10.0-android \
+            -c Release \
+            -p:ApplicationVersion=${{ github.run_number }} \
+            -p:ApplicationDisplayVersion=${{ steps.get_version.outputs.VERSION }} \
+            -o ./apk-artifacts
+
+      - name: Find & Rename Sample APK
+        id: find_apk
+        run: |
+          APK_PATH=$(find ./apk-artifacts -name "*Signed.apk" -o -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find samples/Foldable.Maui.Sample/bin/Release/net10.0-android -name "*Signed.apk" -o -name "*.apk" | head -n 1)
+          fi
+          cp "$APK_PATH" ./Foldable.Maui.Sample-${{ steps.get_version.outputs.VERSION }}.apk
+          echo "APK=./Foldable.Maui.Sample-${{ steps.get_version.outputs.VERSION }}.apk" >> $GITHUB_OUTPUT
+
+      - name: Push to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.find_apk.outputs.APK }}
+            ./artifacts/*.nupkg
+          generate_release_notes: true
