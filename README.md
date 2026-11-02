@@ -11,12 +11,19 @@ A modern, lightweight .NET MAUI library for detecting foldable & dual-screen dev
 
 ## Features
 
-- **Hardware Posture Detection**: Detect `Closed`, `HalfOpened` (tabletop / book mode), and `Flat` states via AndroidX `WindowInfoTracker`.
-- **Live Hinge Angle Sensor**: Read real-time hinge angles (0°–360°) via Android hardware sensor (Type 36).
-- **Hinge & Crease Metrics**: Bounding rectangle and separation state of the fold crease.
+- **4-Posture Hardware Detection**:
+  - `FoldPosture.Closed`: Device folded shut, outer cover screen active (nominal 0°).
+  - `FoldPosture.HalfOpened`: L-shaped Tabletop / Book posture (nominal 90°), ideal for controls on bottom and media on top.
+  - `FoldPosture.Tent`: Inverted-V posture standing on device edges (nominal 80°), single-viewport cover display experience.
+  - `FoldPosture.Flat`: Fully unfolded expansive inner display (nominal 180°).
+- **Multi-Sensor Fusion Engine**:
+  - Android `DeviceStateManager` callback hooks for instant OS-level state transitions.
+  - AndroidX `WindowInfoTracker` for fold crease bounds and separation metrics.
+  - Hardware Hinge Sensor (`SensorType.HingeAngle` / Type 36) for continuous 0°–360° hinge angles.
+  - Z-axis Gravity Sensor for distinguishing tabletop resting flat vs. tent standing on edges.
 - **Center-Split Responsive Engine (`FoldableLayout`)**:
-  - **Master-Detail**: 50/50 exact center split across the hinge on foldables (`640 <= width < 900`). Fixed 320dp sidebar on large displays (`>= 900`). Single-column on phones.
-  - **Grid Lists**: Automatic 2-column center split (`Span = 2`) on foldables.
+  - **Master-Detail**: 50/50 exact center split across the hinge on foldables (`640 <= width < 900`). Fixed 320dp sidebar on large displays (`>= 900`). Single-column on cover screens and tent mode.
+  - **Grid Lists**: Automatic 2-column center split (`Span = 2`) on unfolded screens.
   - **Responsive Forms**: Auto-adjusts form fields into 2 columns on wide screens, respecting full-width inputs.
 
 ---
@@ -34,16 +41,17 @@ public static MauiApp CreateMauiApp()
     var builder = MauiApp.CreateBuilder();
     builder
         .UseMauiApp<App>()
-        .UseFoldable(); // Wires native WindowInfoTracker & hinge sensors
+        .UseFoldable(); // Wires native DeviceStateManager, WindowInfoTracker & hinge sensors
 
     return builder.Build();
 }
 ```
 
 ### 2. Reading Fold Posture & Angle
-Inject or access via `FoldableService.Current`:
+Access via `FoldableService.Current`:
 
 ```csharp
+using Foldable.Maui.Models;
 using Foldable.Maui.Services;
 
 var info = FoldableService.Current.CurrentInfo;
@@ -52,9 +60,20 @@ Console.WriteLine($"IsFoldable: {info.IsFoldable}, Posture: {info.Posture}, Angl
 FoldableService.Current.FoldInfoChanged += (sender, e) =>
 {
     var newInfo = e.Info;
-    if (newInfo.Posture == FoldPosture.HalfOpened)
+    switch (newInfo.Posture)
     {
-        // Tabletop mode: adjust media player or camera preview
+        case FoldPosture.Flat:
+            // Dual-pane or expanded viewport
+            break;
+        case FoldPosture.HalfOpened:
+            // Tabletop mode: controls bottom, camera/media top
+            break;
+        case FoldPosture.Tent:
+            // Tent mode: single cover-screen display
+            break;
+        case FoldPosture.Closed:
+            // Outer cover display
+            break;
     }
 };
 ```
@@ -80,11 +99,21 @@ FoldableLayout.ApplyCenterSplitGrid(width, listItemsLayout);
 
 ---
 
+## Demo Sample App
+
+A complete runnable demo app is located in `samples/Foldable.Maui.Sample`:
+- Live telemetry badge (`Closed`, `Tabletop`, `Tent`, `Flat`).
+- Real-time hinge angle display and bounding box metrics.
+- Adaptive split pane view reacting automatically to fold/unfold motions.
+- Manual posture simulation buttons for testing in simulators.
+
+---
+
 ## Supported Platforms
 
-| Platform | Posture / Hinge Rect | Hinge Angle | Split Layouts |
+| Platform | Postures (Closed, HalfOpened, Tent, Flat) | Hinge Angle | Split Layouts |
 |---|---|---|---|
-| **Android** (API 21+) | Yes (`WindowInfoTracker`) | Yes (Sensor 36) | Yes |
+| **Android** (API 21+) | Yes (`DeviceStateManager` + `WindowInfoTracker` + Gravity) | Yes (Sensor 36) | Yes |
 | **iOS** (15.0+) | Fallback (Split View / Stage Manager) | N/A | Yes |
 | **Mac Catalyst** | Fallback | N/A | Yes |
 

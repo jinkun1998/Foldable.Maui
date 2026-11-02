@@ -24,7 +24,11 @@ public static class FoldableService
     private class DefaultFoldableService : IFoldableService
     {
         public FoldInfo CurrentInfo => FoldInfo.Default;
-        public event EventHandler<FoldInfoChangedEventArgs>? FoldInfoChanged;
+        public event EventHandler<FoldInfoChangedEventArgs>? FoldInfoChanged
+        {
+            add { }
+            remove { }
+        }
         public void StartListening() { }
         public void StopListening() { }
     }
