@@ -18,6 +18,10 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
     private WindowInfoTrackerCallbackAdapter? _trackerAdapter;
     private float? _lastAngle;
     private float _lastGravityZ = 9.8f;
+    private bool _hasHingeFeature;
+    private FoldingFeatureState? _lastFoldState;
+    private HingeOrientation _lastOrientation = HingeOrientation.None;
+    private Rect _lastBounds = Rect.Zero;
     private bool _isListening;
 
     public FoldInfo CurrentInfo { get; private set; } = FoldInfo.Default;
@@ -28,9 +32,12 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
     {
         Context? context = global::Android.App.Application.Context;
         _sensorManager = context?.GetSystemService(Context.SensorService) as SensorManager;
+
         // Sensor.TypeHingeAngle = 36 (Android 11+)
-        _hingeSensor = _sensorManager?.GetDefaultSensor((SensorType)36);
-        _gravitySensor = _sensorManager?.GetDefaultSensor(SensorType.Gravity) 
+        _hingeSensor = _sensorManager?.GetDefaultSensor((SensorType)36)
+            ?? _sensorManager?.GetSensorList((SensorType)36).FirstOrDefault();
+
+        _gravitySensor = _sensorManager?.GetDefaultSensor(SensorType.Gravity)
             ?? _sensorManager?.GetDefaultSensor(SensorType.Accelerometer);
     }
 
@@ -98,51 +105,27 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
 
         if (e.Sensor.Type == (SensorType)36)
         {
-            float angle = e.Values[0];
-            _lastAngle = angle;
-            UpdatePostureFromAngle(angle);
+            _lastAngle = e.Values[0];
+            RecomputeState();
         }
         else if (e.Sensor.Type == SensorType.Gravity || e.Sensor.Type == SensorType.Accelerometer)
         {
-            // Z-axis value: near 9.8 m/s² when resting flat, near 0 m/s² when upright/vertical (standing on edge in tent mode)
             _lastGravityZ = e.Values[2];
-            if (_lastAngle.HasValue && _lastAngle.Value > 10f && _lastAngle.Value < 170f)
+            if (_lastFoldState == FoldingFeatureState.HalfOpened || (_lastAngle > 15f && _lastAngle < 165f))
             {
-                UpdatePostureFromAngle(_lastAngle.Value);
+                RecomputeState();
             }
         }
     }
 
-    private void UpdatePostureFromAngle(float angle)
-    {
-        // ponytail: Tent mode detected when angle is 10°-170° and Z-axis gravity is near zero (|Z| < 3 m/s², standing on edges); upgrade to pitch/roll orientation matrix if inverted tent differentiation needed
-        FoldPosture posture = angle switch
-        {
-            <= 10f => FoldPosture.Closed,
-            >= 170f and <= 190f => FoldPosture.Flat,
-            > 10f and < 170f => Math.Abs(_lastGravityZ) < 3.0f ? FoldPosture.Tent : FoldPosture.HalfOpened,
-            _ => CurrentInfo.Posture
-        };
-
-        UpdateInfo(CurrentInfo with
-        {
-            IsFoldable = true,
-            HingeAngle = angle,
-            Posture = posture
-        });
-    }
-
-    public void OnAccuracyChanged(Sensor? sensor, [GeneratedEnum] SensorStatus accuracy)
-    {
-    }
+    public void OnAccuracyChanged(Sensor? sensor, [GeneratedEnum] SensorStatus accuracy) { }
 
     public void Accept(Java.Lang.Object? obj)
     {
         if (obj is not WindowLayoutInfo layoutInfo) return;
 
         bool hasHinge = false;
-        bool isSeparating = false;
-        FoldPosture posture = FoldPosture.Flat;
+        FoldingFeatureState? foldState = null;
         HingeOrientation orientation = HingeOrientation.None;
         Rect bounds = Rect.Zero;
 
@@ -151,26 +134,7 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
             if (feature is IFoldingFeature fold)
             {
                 hasHinge = true;
-                isSeparating = fold.IsSeparating;
-
-                if (fold.State == FoldingFeatureState.Flat)
-                {
-                    posture = FoldPosture.Flat;
-                }
-                else if (fold.State == FoldingFeatureState.HalfOpened)
-                {
-                    posture = Math.Abs(_lastGravityZ) < 3.0f ? FoldPosture.Tent : FoldPosture.HalfOpened;
-                }
-                else
-                {
-                    posture = FoldPosture.Unknown;
-                }
-
-                if (posture == FoldPosture.Tent)
-                {
-                    isSeparating = false;
-                }
-
+                foldState = fold.State;
                 orientation = fold.Orientation == FoldingFeatureOrientation.Vertical
                     ? HingeOrientation.Vertical
                     : HingeOrientation.Horizontal;
@@ -182,23 +146,97 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
             }
         }
 
-        MainThread.BeginInvokeOnMainThread(() =>
+        _hasHingeFeature = hasHinge;
+        _lastFoldState = foldState;
+        _lastOrientation = orientation;
+        _lastBounds = bounds;
+
+        RecomputeState();
+    }
+
+    private void RecomputeState()
+    {
+        bool isFoldable = _hingeSensor != null || _hasHingeFeature;
+        if (!isFoldable)
         {
-            UpdateInfo(new FoldInfo
+            DispatchUpdate(new FoldInfo
             {
-                IsFoldable = hasHinge || _hingeSensor != null,
-                IsSeparating = isSeparating,
-                Posture = posture,
-                Orientation = orientation,
-                HingeAngle = _lastAngle,
-                HingeBounds = bounds
+                IsFoldable = false,
+                Posture = FoldPosture.Flat,
+                Orientation = HingeOrientation.None,
+                HingeAngle = 180f,
+                IsSeparating = false
             });
+            return;
+        }
+
+        FoldPosture posture;
+        float angle;
+
+        if (_hasHingeFeature)
+        {
+            // Inner unfolded screen is active
+            if (_lastFoldState == FoldingFeatureState.Flat)
+            {
+                posture = FoldPosture.Flat;
+                angle = (_lastAngle.HasValue && _lastAngle.Value >= 165f) ? _lastAngle.Value : 180f;
+            }
+            else
+            {
+                // Half-opened: distinguish Tent vs Tabletop using Z-gravity
+                bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
+                posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
+                angle = (_lastAngle.HasValue && _lastAngle.Value > 15f && _lastAngle.Value < 165f) ? _lastAngle.Value : 90f;
+            }
+        }
+        else
+        {
+            // App window does not cross a hinge: on a foldable, this is the cover display (closed)
+            if (_lastAngle.HasValue)
+            {
+                if (_lastAngle.Value <= 15f)
+                {
+                    posture = FoldPosture.Closed;
+                    angle = _lastAngle.Value;
+                }
+                else if (_lastAngle.Value >= 165f)
+                {
+                    posture = FoldPosture.Flat;
+                    angle = _lastAngle.Value;
+                }
+                else
+                {
+                    bool isTent = Math.Abs(_lastGravityZ) < 4.0f;
+                    posture = isTent ? FoldPosture.Tent : FoldPosture.HalfOpened;
+                    angle = _lastAngle.Value;
+                }
+            }
+            else
+            {
+                posture = FoldPosture.Closed;
+                angle = 0f;
+            }
+        }
+
+        bool isSeparating = posture == FoldPosture.HalfOpened;
+
+        DispatchUpdate(new FoldInfo
+        {
+            IsFoldable = true,
+            IsSeparating = isSeparating,
+            Posture = posture,
+            Orientation = _lastOrientation,
+            HingeAngle = angle,
+            HingeBounds = _lastBounds
         });
     }
 
-    private void UpdateInfo(FoldInfo newInfo)
+    private void DispatchUpdate(FoldInfo newInfo)
     {
-        CurrentInfo = newInfo;
-        FoldInfoChanged?.Invoke(this, new FoldInfoChangedEventArgs(newInfo));
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            CurrentInfo = newInfo;
+            FoldInfoChanged?.Invoke(this, new FoldInfoChangedEventArgs(newInfo));
+        });
     }
 }

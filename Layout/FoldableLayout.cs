@@ -229,9 +229,12 @@ public static class FoldableLayout
         ApplyCenterSplitGrid(829, 690, itemsLayout);
         System.Diagnostics.Debug.Assert(itemsLayout.Span == 3);
 
-        // 6. Tent mode does not split master-detail
+        // 6. Tent mode and Closed posture do not split master-detail
         FoldInfo tentInfo = new() { Posture = FoldPosture.Tent, IsSeparating = true };
         System.Diagnostics.Debug.Assert(!tentInfo.ShouldSplit(829, 690));
+
+        FoldInfo closedInfo = new() { Posture = FoldPosture.Closed, IsSeparating = false };
+        System.Diagnostics.Debug.Assert(!closedInfo.ShouldSplit(829, 690));
 
         return true;
     }
