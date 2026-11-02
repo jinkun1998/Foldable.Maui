@@ -121,4 +121,4 @@ A complete runnable demo app is located in `samples/Foldable.Maui.Sample`:
 
 ## License
 
-MIT © [Quoc Thao (JIN)](https://github.com/jinkun1998)
+MIT © [Quoc Thao (jinkun1998)](https://github.com/jinkun1998)
