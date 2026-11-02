@@ -30,6 +30,7 @@ public record FoldInfo
     /// </summary>
     public bool ShouldSplit(double width, double height)
     {
+        if (Posture == FoldPosture.Tent) return false;
         if (IsSeparating) return true;
         return width >= 640 && Math.Min(width, height) >= 550 && (width / height >= 0.70 || width >= 900);
     }

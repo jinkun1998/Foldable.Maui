@@ -11,9 +11,12 @@ public enum FoldPosture
     /// <summary>The foldable device is fully closed.</summary>
     Closed = 1,
 
-    /// <summary>The foldable device is partially opened (tabletop or tent posture, typically 90° - 150°).</summary>
+    /// <summary>The foldable device is partially opened in tabletop posture (typically 90° - 150°, resting on base).</summary>
     HalfOpened = 2,
 
     /// <summary>The foldable device is completely flat / unfolded (typically ~180°).</summary>
-    Flat = 3
+    Flat = 3,
+
+    /// <summary>The foldable device is partially opened in tent posture (standing on edges in an inverted-V shape).</summary>
+    Tent = 4
 }

@@ -14,8 +14,10 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
 {
     private readonly SensorManager? _sensorManager;
     private readonly Sensor? _hingeSensor;
+    private readonly Sensor? _gravitySensor;
     private WindowInfoTrackerCallbackAdapter? _trackerAdapter;
     private float? _lastAngle;
+    private float _lastGravityZ = 9.8f;
     private bool _isListening;
 
     public FoldInfo CurrentInfo { get; private set; } = FoldInfo.Default;
@@ -28,6 +30,8 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         _sensorManager = context?.GetSystemService(Context.SensorService) as SensorManager;
         // Sensor.TypeHingeAngle = 36 (Android 11+)
         _hingeSensor = _sensorManager?.GetDefaultSensor((SensorType)36);
+        _gravitySensor = _sensorManager?.GetDefaultSensor(SensorType.Gravity) 
+            ?? _sensorManager?.GetDefaultSensor(SensorType.Accelerometer);
     }
 
     public void StartListening()
@@ -35,9 +39,12 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         if (_isListening) return;
         _isListening = true;
 
-        if (_hingeSensor != null && _sensorManager != null)
+        if (_sensorManager != null)
         {
-            _sensorManager.RegisterListener(this, _hingeSensor, SensorDelay.Normal);
+            if (_hingeSensor != null)
+                _sensorManager.RegisterListener(this, _hingeSensor, SensorDelay.Normal);
+            if (_gravitySensor != null)
+                _sensorManager.RegisterListener(this, _gravitySensor, SensorDelay.Normal);
         }
 
         var activity = Platform.CurrentActivity;
@@ -64,9 +71,12 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
         if (!_isListening) return;
         _isListening = false;
 
-        if (_hingeSensor != null && _sensorManager != null)
+        if (_sensorManager != null)
         {
-            _sensorManager.UnregisterListener(this, _hingeSensor);
+            if (_hingeSensor != null)
+                _sensorManager.UnregisterListener(this, _hingeSensor);
+            if (_gravitySensor != null)
+                _sensorManager.UnregisterListener(this, _gravitySensor);
         }
 
         if (_trackerAdapter != null)
@@ -84,16 +94,33 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
 
     public void OnSensorChanged(SensorEvent? e)
     {
-        if (e == null || e.Values == null || e.Values.Count == 0) return;
+        if (e == null || e.Values == null || e.Values.Count == 0 || e.Sensor == null) return;
 
-        float angle = e.Values[0];
-        _lastAngle = angle;
+        if (e.Sensor.Type == (SensorType)36)
+        {
+            float angle = e.Values[0];
+            _lastAngle = angle;
+            UpdatePostureFromAngle(angle);
+        }
+        else if (e.Sensor.Type == SensorType.Gravity || e.Sensor.Type == SensorType.Accelerometer)
+        {
+            // Z-axis value: near 9.8 m/s² when resting flat, near 0 m/s² when upright/vertical (standing on edge in tent mode)
+            _lastGravityZ = e.Values[2];
+            if (_lastAngle.HasValue && _lastAngle.Value > 10f && _lastAngle.Value < 170f)
+            {
+                UpdatePostureFromAngle(_lastAngle.Value);
+            }
+        }
+    }
 
+    private void UpdatePostureFromAngle(float angle)
+    {
+        // ponytail: Tent mode detected when angle is 10°-170° and Z-axis gravity is near zero (|Z| < 3 m/s², standing on edges); upgrade to pitch/roll orientation matrix if inverted tent differentiation needed
         FoldPosture posture = angle switch
         {
             <= 10f => FoldPosture.Closed,
             >= 170f and <= 190f => FoldPosture.Flat,
-            > 10f and < 170f => FoldPosture.HalfOpened,
+            > 10f and < 170f => Math.Abs(_lastGravityZ) < 3.0f ? FoldPosture.Tent : FoldPosture.HalfOpened,
             _ => CurrentInfo.Posture
         };
 
@@ -132,11 +159,16 @@ public class FoldableServiceImplementation : Java.Lang.Object, IFoldableService,
                 }
                 else if (fold.State == FoldingFeatureState.HalfOpened)
                 {
-                    posture = FoldPosture.HalfOpened;
+                    posture = Math.Abs(_lastGravityZ) < 3.0f ? FoldPosture.Tent : FoldPosture.HalfOpened;
                 }
                 else
                 {
                     posture = FoldPosture.Unknown;
+                }
+
+                if (posture == FoldPosture.Tent)
+                {
+                    isSeparating = false;
                 }
 
                 orientation = fold.Orientation == FoldingFeatureOrientation.Vertical

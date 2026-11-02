@@ -1,5 +1,7 @@
+using Foldable.Maui.Models;
 using Foldable.Maui.Services;
 using Microsoft.Maui.Controls;
+using Microsoft.Maui.Devices;
 
 namespace Foldable.Maui.Layout;
 
@@ -26,7 +28,7 @@ public static class FoldableLayout
             -1);
 
     /// <summary>
-    /// Applies 50/50 center-split on foldables (640-899dp) and fixed-sidebar on large screens (&gt;=900dp).
+    /// Master-Detail: 50/50 center-split on portrait foldables (1812x2176); compact 280dp sidebar + 2-col list on landscape (2176x1812); single col on phone.
     /// </summary>
     public static void ApplyMasterDetail(
         double width,
@@ -38,7 +40,9 @@ public static class FoldableLayout
     {
         if (width <= 0 || height <= 0) return;
 
-        bool isWideOrFoldable = width >= 640 && Math.Min(width, height) >= 550 && (width / height >= 0.70 || width >= 900);
+        double shortestSide = Math.Min(width, height);
+        bool isWideOrFoldable = width >= 640 && shortestSide >= 550 && (width / height >= 0.70 || width >= 900);
+        bool isLandscape = isWideOrFoldable && width > height && width >= 750;
 
         if (leftSidebar != null && leftCol != null)
         {
@@ -49,15 +53,16 @@ public static class FoldableLayout
                 leftSidebar.WidthRequest = 0;
                 leftCol.Width = new GridLength(0);
             }
-            else if (width >= 900)
+            else if (isLandscape || width >= 900)
             {
-                // Desktop / large tablet: fixed 320dp sidebar
-                leftSidebar.WidthRequest = 320;
-                leftCol.Width = new GridLength(320);
+                // Landscape foldable (2176x1812) or desktop: compact 280dp sidebar
+                double sidebarWidth = width >= 1000 ? 320 : 280;
+                leftSidebar.WidthRequest = sidebarWidth;
+                leftCol.Width = new GridLength(sidebarWidth);
             }
             else
             {
-                // Foldable unfolded: exact 50/50 center split down the crease
+                // Portrait foldable (1812x2176): exact 50/50 center split down vertical crease
                 leftSidebar.WidthRequest = -1;
                 leftCol.Width = new GridLength(1, GridUnitType.Star);
             }
@@ -70,7 +75,7 @@ public static class FoldableLayout
 
         if (listLayout != null)
         {
-            int targetSpan = (!isWideOrFoldable || width < 1200) ? 1 : 2;
+            int targetSpan = isLandscape ? 2 : 1;
             if (listLayout.Span != targetSpan)
             {
                 listLayout.Span = targetSpan;
@@ -79,18 +84,48 @@ public static class FoldableLayout
     }
 
     /// <summary>
-    /// Divides a CollectionView into 2 equal center-split columns on foldables and 3 on tablets.
+    /// Standalone lists: 1 col on normal phone (shortest dimension &lt; 550dp), 2 cols on portrait foldable (1812x2176), 3+ cols on landscape (2176x1812).
     /// </summary>
-    public static void ApplyCenterSplitGrid(double width, GridItemsLayout? listLayout, int breakpoint = 640)
+    public static void ApplyCenterSplitGrid(double width, double height, GridItemsLayout? listLayout, int breakpoint = 640)
     {
-        if (listLayout == null || width <= 0) return;
+        if (listLayout == null) return;
 
-        int newSpan = width >= 1100 ? 3 : (width >= breakpoint ? 2 : 1);
+        double shortestSide;
+        if (width > 0 && height > 0)
+        {
+            shortestSide = Math.Min(width, height);
+        }
+        else
+        {
+            var main = DeviceDisplay.Current.MainDisplayInfo;
+            double density = main.Density > 0 ? main.Density : 1.0;
+            shortestSide = Math.Min(main.Width, main.Height) / density;
+            if (width <= 0) width = main.Width / density;
+            if (height <= 0) height = main.Height / density;
+        }
+
+        // Normal phone (any phone with shortest dimension < 550dp): ALWAYS 1 column
+        if (shortestSide < 550)
+        {
+            if (listLayout.Span != 1)
+            {
+                listLayout.Span = 1;
+            }
+            return;
+        }
+
+        // Foldables unfolded & tablets (shortestSide >= 550dp):
+        bool isLandscape = width > height && width >= 750;
+        int newSpan = isLandscape ? Math.Max(3, (int)(width / 260)) : (width >= breakpoint ? 2 : 1);
+
         if (listLayout.Span != newSpan)
         {
             listLayout.Span = newSpan;
         }
     }
+
+    public static void ApplyCenterSplitGrid(double width, GridItemsLayout? listLayout, int breakpoint = 640)
+        => ApplyCenterSplitGrid(width, 0, listLayout, breakpoint);
 
     /// <summary>
     /// Adapts a form grid into 2 columns on wide/foldable screens, respecting IsFullWidth.
@@ -164,32 +199,41 @@ public static class FoldableLayout
         Border searchBar = new();
         GridItemsLayout itemsLayout = new(ItemsLayoutOrientation.Vertical);
 
-        // 1. Foldable width (750dp) -> 50/50 center split
-        ApplyMasterDetail(750, 800, col, sidebar, searchBar, itemsLayout);
+        // 1. Normal phone portrait (390x844dp) -> 1 column
+        ApplyCenterSplitGrid(390, 844, itemsLayout);
+        System.Diagnostics.Debug.Assert(itemsLayout.Span == 1);
+
+        // 2. Normal phone landscape (844x390dp) -> 1 column
+        ApplyCenterSplitGrid(844, 390, itemsLayout);
+        System.Diagnostics.Debug.Assert(itemsLayout.Span == 1);
+
+        // 3. Fold4 cover screen (344x882dp) -> 1 column
+        ApplyCenterSplitGrid(344, 882, itemsLayout);
+        System.Diagnostics.Debug.Assert(itemsLayout.Span == 1);
+
+        // 4. Portrait Foldable (690x829dp = 1812x2176 px) -> 50/50 master-detail, 2 cols standalone
+        ApplyMasterDetail(690, 829, col, sidebar, searchBar, itemsLayout);
         System.Diagnostics.Debug.Assert(sidebar.IsVisible == true);
-        System.Diagnostics.Debug.Assert(searchBar.IsVisible == false);
         System.Diagnostics.Debug.Assert(col.Width.IsStar && col.Width.Value == 1);
         System.Diagnostics.Debug.Assert(itemsLayout.Span == 1);
 
-        // 2. Phone width (400dp) -> single column, popup filter
-        ApplyMasterDetail(400, 800, col, sidebar, searchBar, itemsLayout);
-        System.Diagnostics.Debug.Assert(sidebar.IsVisible == false);
-        System.Diagnostics.Debug.Assert(searchBar.IsVisible == true);
-        System.Diagnostics.Debug.Assert(col.Width.Value == 0);
-
-        // 3. Desktop / large tablet (1000dp) -> fixed 320dp sidebar
-        ApplyMasterDetail(1000, 800, col, sidebar, searchBar, itemsLayout);
-        System.Diagnostics.Debug.Assert(sidebar.IsVisible == true);
-        System.Diagnostics.Debug.Assert(col.Width.Value == 320);
-
-        // 4. Center-split standalone list
-        ApplyCenterSplitGrid(750, itemsLayout);
+        ApplyCenterSplitGrid(690, 829, itemsLayout);
         System.Diagnostics.Debug.Assert(itemsLayout.Span == 2);
-        ApplyCenterSplitGrid(400, itemsLayout);
-        System.Diagnostics.Debug.Assert(itemsLayout.Span == 1);
+
+        // 5. Landscape Foldable (829x690dp = 2176x1812 px) -> 280dp filter, 3 cols standalone
+        ApplyMasterDetail(829, 690, col, sidebar, searchBar, itemsLayout);
+        System.Diagnostics.Debug.Assert(sidebar.IsVisible == true);
+        System.Diagnostics.Debug.Assert(col.Width.Value == 280);
+        System.Diagnostics.Debug.Assert(itemsLayout.Span == 2);
+
+        ApplyCenterSplitGrid(829, 690, itemsLayout);
+        System.Diagnostics.Debug.Assert(itemsLayout.Span == 3);
+
+        // 6. Tent mode does not split master-detail
+        FoldInfo tentInfo = new() { Posture = FoldPosture.Tent, IsSeparating = true };
+        System.Diagnostics.Debug.Assert(!tentInfo.ShouldSplit(829, 690));
 
         return true;
     }
 #endif
-
 }
