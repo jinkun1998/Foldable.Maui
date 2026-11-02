@@ -35,4 +35,10 @@
 		<PackageReference Include="Xamarin.AndroidX.Window.WindowJava" Version="1.4.0.1" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<Compile Remove="samples\**" />
+		<None Remove="samples\**" />
+		<MauiXaml Remove="samples\**" />
+	</ItemGroup>
+
 </Project>

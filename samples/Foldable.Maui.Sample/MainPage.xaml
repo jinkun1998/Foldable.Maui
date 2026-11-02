@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Foldable.Maui.Sample.MainPage"
+             Title="Foldable.Maui Demo"
+             BackgroundColor="#0F172A">
+
+    <Grid x:Name="RootGrid"
+          ColumnDefinitions="*,*"
+          RowDefinitions="*"
+          Padding="16"
+          ColumnSpacing="16"
+          RowSpacing="16">
+
+        <!-- Left / Top Pane: Hardware Telemetry -->
+        <Border Grid.Column="0"
+                Grid.Row="0"
+                x:Name="TelemetryCard"
+                Background="#1E293B"
+                Stroke="#334155"
+                StrokeThickness="1"
+                StrokeShape="RoundRectangle 16"
+                Padding="20">
+            <ScrollView>
+                <VerticalStackLayout Spacing="16">
+                    <HorizontalStackLayout Spacing="10" VerticalOptions="Center">
+                        <Label Text="Foldable Status"
+                               FontSize="20"
+                               FontAttributes="Bold"
+                               TextColor="#F8FAFC" />
+                        <Border x:Name="PostureBadge"
+                                Background="#3B82F6"
+                                StrokeThickness="0"
+                                StrokeShape="RoundRectangle 12"
+                                Padding="10,4">
+                            <Label x:Name="PostureLabel"
+                                   Text="Unknown"
+                                   FontSize="12"
+                                   FontAttributes="Bold"
+                                   TextColor="White" />
+                        </Border>
+                    </HorizontalStackLayout>
+
+                    <!-- Big Angle Display -->
+                    <Border Background="#0F172A"
+                            Stroke="#334155"
+                            StrokeShape="RoundRectangle 12"
+                            Padding="16">
+                        <VerticalStackLayout Spacing="4" HorizontalOptions="Center">
+                            <Label Text="HINGE ANGLE"
+                                   FontSize="11"
+                                   FontAttributes="Bold"
+                                   TextColor="#94A3B8"
+                                   HorizontalOptions="Center" />
+                            <Label x:Name="AngleLabel"
+                                   Text="--°"
+                                   FontSize="36"
+                                   FontAttributes="Bold"
+                                   TextColor="#38BDF8"
+                                   HorizontalOptions="Center" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <!-- Property Grid -->
+                    <Grid ColumnDefinitions="*,*"
+                          RowDefinitions="Auto,Auto,Auto"
+                          ColumnSpacing="12"
+                          RowSpacing="12">
+
+                        <Border Grid.Row="0" Grid.Column="0" Background="#0F172A" Stroke="#334155" StrokeShape="RoundRectangle 8" Padding="12">
+                            <VerticalStackLayout>
+                                <Label Text="IS FOLDABLE" FontSize="10" TextColor="#64748B" FontAttributes="Bold" />
+                                <Label x:Name="IsFoldableLabel" Text="No" FontSize="14" TextColor="#F8FAFC" FontAttributes="Bold" />
+                            </VerticalStackLayout>
+                        </Border>
+
+                        <Border Grid.Row="0" Grid.Column="1" Background="#0F172A" Stroke="#334155" StrokeShape="RoundRectangle 8" Padding="12">
+                            <VerticalStackLayout>
+                                <Label Text="IS SEPARATING" FontSize="10" TextColor="#64748B" FontAttributes="Bold" />
+                                <Label x:Name="IsSeparatingLabel" Text="No" FontSize="14" TextColor="#F8FAFC" FontAttributes="Bold" />
+                            </VerticalStackLayout>
+                        </Border>
+
+                        <Border Grid.Row="1" Grid.Column="0" Background="#0F172A" Stroke="#334155" StrokeShape="RoundRectangle 8" Padding="12">
+                            <VerticalStackLayout>
+                                <Label Text="ORIENTATION" FontSize="10" TextColor="#64748B" FontAttributes="Bold" />
+                                <Label x:Name="OrientationLabel" Text="None" FontSize="14" TextColor="#F8FAFC" FontAttributes="Bold" />
+                            </VerticalStackLayout>
+                        </Border>
+
+                        <Border Grid.Row="1" Grid.Column="1" Background="#0F172A" Stroke="#334155" StrokeShape="RoundRectangle 8" Padding="12">
+                            <VerticalStackLayout>
+                                <Label Text="SHOULD SPLIT" FontSize="10" TextColor="#64748B" FontAttributes="Bold" />
+                                <Label x:Name="ShouldSplitLabel" Text="No" FontSize="14" TextColor="#F8FAFC" FontAttributes="Bold" />
+                            </VerticalStackLayout>
+                        </Border>
+
+                        <Border Grid.Row="2" Grid.ColumnSpan="2" Background="#0F172A" Stroke="#334155" StrokeShape="RoundRectangle 8" Padding="12">
+                            <VerticalStackLayout>
+                                <Label Text="HINGE BOUNDS" FontSize="10" TextColor="#64748B" FontAttributes="Bold" />
+                                <Label x:Name="BoundsLabel" Text="0, 0, 0, 0" FontSize="12" TextColor="#94A3B8" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </Grid>
+
+                    <!-- Manual Simulation for Testing on Non-Foldables -->
+                    <Label Text="Simulate Posture (Preview)"
+                           FontSize="12"
+                           FontAttributes="Bold"
+                           TextColor="#94A3B8"
+                           Margin="0,8,0,0" />
+
+                    <HorizontalStackLayout Spacing="8">
+                        <Button Text="Flat (180°)"
+                                Clicked="OnSimulateFlatClicked"
+                                FontSize="11"
+                                Padding="10,6"
+                                BackgroundColor="#059669"
+                                TextColor="White" />
+                        <Button Text="Tabletop (100°)"
+                                Clicked="OnSimulateTabletopClicked"
+                                FontSize="11"
+                                Padding="10,6"
+                                BackgroundColor="#D97706"
+                                TextColor="White" />
+                        <Button Text="Tent (80°)"
+                                Clicked="OnSimulateTentClicked"
+                                FontSize="11"
+                                Padding="10,6"
+                                BackgroundColor="#7C3AED"
+                                TextColor="White" />
+                        <Button Text="Closed (0°)"
+                                Clicked="OnSimulateClosedClicked"
+                                FontSize="11"
+                                Padding="10,6"
+                                BackgroundColor="#475569"
+                                TextColor="White" />
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </ScrollView>
+        </Border>
+
+        <!-- Right / Bottom Pane: Adaptive Content Preview -->
+        <Border Grid.Column="1"
+                Grid.Row="0"
+                x:Name="ContentCard"
+                Background="#1E293B"
+                Stroke="#334155"
+                StrokeThickness="1"
+                StrokeShape="RoundRectangle 16"
+                Padding="20">
+            <VerticalStackLayout Spacing="16" VerticalOptions="Center">
+                <Border Background="#0F172A"
+                        Stroke="#38BDF8"
+                        StrokeThickness="1"
+                        StrokeShape="RoundRectangle 12"
+                        Padding="16"
+                        HorizontalOptions="Center">
+                    <Label x:Name="AdaptiveModeTitle"
+                           Text="Adaptive Pane View"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="#38BDF8"
+                           HorizontalOptions="Center" />
+                </Border>
+
+                <Label x:Name="AdaptiveModeDescription"
+                       Text="When unfolded or in tabletop posture, this panel splits side-by-side or stacks vertically. In tent or closed posture, layout simplifies to single-viewport mode."
+                       FontSize="13"
+                       TextColor="#94A3B8"
+                       HorizontalTextAlignment="Center" />
+
+                <Border x:Name="InteractiveBox"
+                        Background="#0F172A"
+                        Stroke="#334155"
+                        StrokeShape="RoundRectangle 12"
+                        HeightRequest="120"
+                        Padding="12">
+                    <Label x:Name="PostureHelpText"
+                           Text="Move the foldable hinge to see real-time updates."
+                           FontSize="13"
+                           TextColor="#CBD5E1"
+                           VerticalOptions="Center"
+                           HorizontalOptions="Center" />
+                </Border>
+            </VerticalStackLayout>
+        </Border>
+
+    </Grid>
+</ContentPage>
